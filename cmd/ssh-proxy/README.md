@@ -75,6 +75,12 @@ Options:
         Proxy type: h1, h2, or h2c (default: auto-detect from URL)
   -auth string
         Proxy authentication (e.g., 'Bearer token' or 'Basic base64')
+  -oidc-issuer string
+        OIDC issuer URL for automatic token acquisition
+  -oidc-client-id string
+        OIDC client ID (required if -oidc-issuer is set)
+  -oidc-scopes string
+        OIDC scopes (comma-separated, default: openid)
   -insecure
         Skip TLS verification
   -timeout duration
@@ -93,10 +99,32 @@ Options:
 ssh -o ProxyCommand='ssh-proxy -proxy https://proxy.example.com:443 %h %p' user@server.com
 ```
 
-### With Authentication
+### With Bearer Token Authentication
 
 ```bash
 ssh -o ProxyCommand='ssh-proxy -proxy https://proxy.example.com:443 -auth "Bearer my-token" %h %p' user@server.com
+```
+
+### With OIDC Authentication
+
+Automatically acquire OIDC tokens:
+
+```bash
+ssh -o ProxyCommand='ssh-proxy -proxy https://proxy.example.com:443 -oidc-issuer https://accounts.google.com -oidc-client-id your-client-id.apps.googleusercontent.com %h %p' user@server.com
+```
+
+On first use:
+1. Your browser will launch for OAuth2 authentication
+2. After authentication, the ID token is cached locally
+3. Subsequent SSH connections reuse the cached token
+4. Token is automatically refreshed when needed
+
+In `~/.ssh/config`:
+
+```ssh-config
+Host *.internal.example.com
+  ProxyCommand ssh-proxy -proxy https://proxy.example.com:443 -oidc-issuer https://accounts.google.com -oidc-client-id your-client-id.apps.googleusercontent.com %h %p
+  User myuser
 ```
 
 ### With Custom Timeout

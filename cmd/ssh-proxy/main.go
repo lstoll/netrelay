@@ -15,9 +15,13 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"time"
 
+	"golang.org/x/oauth2"
 	"lds.li/funnelproxy/connecttunnel"
+	"lds.li/oauth2ext/clitoken"
+	"lds.li/oauth2ext/provider"
 )
 
 var (
@@ -28,6 +32,11 @@ var (
 	timeout    = flag.Duration("timeout", 30*time.Second, "Connection timeout")
 	verbose    = flag.Bool("verbose", false, "Enable verbose logging (written to stderr)")
 	bufferSize = flag.Int("buffer", 32*1024, "I/O buffer size in bytes")
+
+	// OIDC authentication flags
+	oidcIssuer   = flag.String("oidc-issuer", "", "OIDC issuer URL for automatic token acquisition")
+	oidcClientID = flag.String("oidc-client-id", "", "OIDC client ID (required if -oidc-issuer is set)")
+	oidcScopes   = flag.String("oidc-scopes", "openid", "OIDC scopes (comma-separated, default: openid)")
 )
 
 func main() {
@@ -65,6 +74,30 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: target host and port are required\n\n")
 		flag.Usage()
 		os.Exit(1)
+	}
+
+	// Validate OIDC configuration
+	if *oidcIssuer != "" && *oidcClientID == "" {
+		fmt.Fprintf(os.Stderr, "Error: -oidc-client-id is required when -oidc-issuer is set\n\n")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *proxyAuth != "" && *oidcIssuer != "" {
+		fmt.Fprintf(os.Stderr, "Error: cannot use both -auth and -oidc-issuer (choose one)\n\n")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	// Acquire OIDC token if configured
+	if *oidcIssuer != "" {
+		token, err := acquireOIDCToken(context.Background())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error acquiring OIDC token: %v\n", err)
+			os.Exit(1)
+		}
+		*proxyAuth = "Bearer " + token
+		log.Println("✓ OIDC token acquired")
 	}
 
 	targetHost := flag.Arg(0)
@@ -171,4 +204,50 @@ func createDialer() (connecttunnel.Dialer, error) {
 	default:
 		return nil, fmt.Errorf("invalid proxy type: %s (must be h1, h2, or h2c)", dialerType)
 	}
+}
+
+// acquireOIDCToken gets an OIDC ID token using the OAuth2 flow.
+func acquireOIDCToken(ctx context.Context) (string, error) {
+	// Discover the OIDC provider
+	p, err := provider.DiscoverOIDCProvider(ctx, *oidcIssuer)
+	if err != nil {
+		return "", fmt.Errorf("failed to discover OIDC provider: %w", err)
+	}
+
+	// Parse scopes
+	scopes := strings.Split(*oidcScopes, ",")
+	for i := range scopes {
+		scopes[i] = strings.TrimSpace(scopes[i])
+	}
+
+	// Configure OAuth2 client
+	oauth2Config := oauth2.Config{
+		ClientID: *oidcClientID,
+		Endpoint: p.Endpoint(),
+		Scopes:   scopes,
+	}
+
+	// Create CLI token source with automatic browser flow
+	cliConfig := &clitoken.Config{
+		OAuth2Config: oauth2Config,
+	}
+
+	tokenSource, err := cliConfig.TokenSource(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to create token source: %w", err)
+	}
+
+	// Get the token (this will launch browser if needed)
+	token, err := tokenSource.Token()
+	if err != nil {
+		return "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	// Extract ID token
+	idToken, ok := token.Extra("id_token").(string)
+	if !ok {
+		return "", fmt.Errorf("no id_token in response")
+	}
+
+	return idToken, nil
 }

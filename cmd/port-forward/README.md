@@ -54,15 +54,39 @@ port-forward -proxy https://proxy.example.com:443 \
   -forward api=localhost:8081=api.example.com:443
 ```
 
-### With Authentication
+### With Bearer Token Authentication
 
-Add proxy authentication:
+Add proxy authentication with a bearer token:
 
 ```bash
 port-forward -proxy https://proxy.example.com:443 \
   -auth 'Bearer my-secret-token' \
   -forward localhost:8080=example.com:80
 ```
+
+### With OIDC Authentication
+
+Automatically acquire and use OIDC ID tokens:
+
+```bash
+port-forward -proxy https://proxy.example.com:443 \
+  -oidc-issuer https://accounts.google.com \
+  -oidc-client-id your-client-id.apps.googleusercontent.com \
+  -forward localhost:8080=example.com:80
+```
+
+This will:
+1. Automatically launch your browser for OAuth2 authentication
+2. Acquire an ID token from the OIDC provider
+3. Use the ID token in `Proxy-Authorization: Bearer <id-token>`
+4. Tokens are cached locally for reuse
+
+Supported OIDC providers:
+- Google: `https://accounts.google.com`
+- Azure AD: `https://login.microsoftonline.com/{tenant}/v2.0`
+- Okta: `https://{domain}.okta.com`
+- Auth0: `https://{domain}.auth0.com`
+- Any OIDC-compliant provider
 
 ### Listen on All Interfaces
 
@@ -97,6 +121,12 @@ Options:
         Proxy type: h1, h2, or h2c (default: auto-detect from URL)
   -auth string
         Proxy authentication header value (e.g., 'Bearer token')
+  -oidc-issuer string
+        OIDC issuer URL for automatic token acquisition
+  -oidc-client-id string
+        OIDC client ID (required if -oidc-issuer is set)
+  -oidc-scopes string
+        OIDC scopes (comma-separated, default: openid)
   -insecure
         Skip TLS verification
   -verbose

@@ -7,7 +7,7 @@ A Tailscale Funnel-enabled CONNECT proxy server that uses Tailscale as a library
 - **Tailscale Funnel Integration**: Automatically exposes the proxy to the internet via Tailscale Funnel
 - **HTTP/1.1 and HTTP/2 Support**: Handles both CONNECT protocols
 - **h2c (HTTP/2 Cleartext)**: Supports HTTP/2 without TLS (Tailscale handles TLS termination)
-- **Optional Authentication**: Bearer token authentication for proxy access
+- **Multiple Authentication Methods**: Bearer token or OIDC/OAuth2 ID token authentication
 - **Automatic TLS**: Tailscale Funnel provides automatic HTTPS with valid certificates
 
 ## Installation
@@ -43,7 +43,7 @@ ts-server -hostname my-proxy
 
 Access at: `https://my-proxy.ts.net:443`
 
-### 3. With Authentication
+### 3. With Bearer Token Authentication
 
 ```bash
 ts-server -auth -auth-token my-secret-token
@@ -54,7 +54,32 @@ Clients must include the header:
 Proxy-Authorization: Bearer my-secret-token
 ```
 
-### 4. With Tailscale Auth Key (for unattended setup)
+### 4. With OIDC Authentication
+
+```bash
+ts-server -oidc-issuer https://accounts.google.com \
+  -oidc-audience my-client-id
+```
+
+Clients must include a valid OIDC ID token:
+```
+Proxy-Authorization: Bearer <id-token>
+```
+
+Supported OIDC providers:
+- Google (https://accounts.google.com)
+- Azure AD (https://login.microsoftonline.com/{tenant}/v2.0)
+- Okta (https://{domain}.okta.com)
+- Auth0 (https://{domain}.auth0.com)
+- Any OIDC-compliant provider
+
+The server will:
+- Validate the token signature against the provider's JWKS
+- Verify the token hasn't expired
+- Check the audience matches your client ID
+- Extract user identity (email/subject) for logging
+
+### 5. With Tailscale Auth Key (for unattended setup)
 
 ```bash
 ts-server -authkey tskey-auth-xxxxx -hostname my-proxy
@@ -67,9 +92,13 @@ Get an auth key from: https://login.tailscale.com/admin/settings/keys
 ```
 Usage of ts-server:
   -auth
-        Enable simple proxy authentication
+        Enable simple bearer token authentication
   -auth-token string
         Authentication token (required if -auth is set)
+  -oidc-issuer string
+        OIDC issuer URL (e.g., https://accounts.google.com)
+  -oidc-audience string
+        OIDC audience/client ID (required if -oidc-issuer is set)
   -authkey string
         Tailscale auth key (optional, uses existing auth if not provided)
   -hostname string
@@ -90,9 +119,14 @@ Usage of ts-server:
 # Without authentication
 curl -x https://my-proxy.ts.net:443 https://example.com
 
-# With authentication
+# With bearer token authentication
 curl -x https://my-proxy.ts.net:443 \
      -H "Proxy-Authorization: Bearer my-secret-token" \
+     https://example.com
+
+# With OIDC authentication (ID token)
+curl -x https://my-proxy.ts.net:443 \
+     -H "Proxy-Authorization: Bearer <id-token>" \
      https://example.com
 ```
 
@@ -162,10 +196,56 @@ The proxy receives:
 
 ### Authentication
 
+#### Bearer Token Authentication
+
+For simple use cases, generate a strong random token:
+
 ```bash
 # Generate a random token
 AUTH_TOKEN=$(openssl rand -hex 32)
 ts-server -auth -auth-token "$AUTH_TOKEN"
+```
+
+#### OIDC Authentication (Recommended for Production)
+
+OIDC provides stronger security with:
+- Cryptographic token verification
+- Automatic expiration
+- User identity tracking
+- No shared secrets
+
+Example with Google:
+
+```bash
+ts-server -oidc-issuer https://accounts.google.com \
+  -oidc-audience your-client-id.apps.googleusercontent.com
+```
+
+**Obtaining ID Tokens:**
+
+Clients need to obtain an ID token from the OIDC provider. Example using OAuth2:
+
+```bash
+# Get ID token using OAuth2 device flow or other flow
+# The token will look like: eyJhbGciOiJSUzI1NiIs...
+
+# Use with curl
+curl -x https://my-proxy.ts.net:443 \
+  -H "Proxy-Authorization: Bearer $ID_TOKEN" \
+  https://example.com
+```
+
+**Setting up OIDC Provider:**
+
+1. Register your application with the OIDC provider
+2. Get the client ID (this is your audience)
+3. Configure the issuer URL
+4. Clients authenticate and receive ID tokens
+5. Clients include the ID token in `Proxy-Authorization` header
+
+The server logs will show authenticated users:
+```
+Tunnel: 1.2.3.4 (user@example.com) -> example.com:443 (proto: HTTP/2.0)
 ```
 
 ### Network Access
