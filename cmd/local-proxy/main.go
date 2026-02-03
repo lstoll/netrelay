@@ -6,11 +6,12 @@
 // the remote proxy.
 //
 // Example:
-//   local-proxy -proxy https://proxy.example.com:443 -listen localhost:8080
 //
-//   # Then use with any tool:
-//   curl -x http://localhost:8080 https://example.com
-//   ssh -o ProxyCommand='nc -X connect -x localhost:8080 %h %p' user@server
+//	local-proxy -proxy https://proxy.example.com:443 -listen localhost:8080
+//
+//	# Then use with any tool:
+//	curl -x http://localhost:8080 https://example.com
+//	ssh -o ProxyCommand='nc -X connect -x localhost:8080 %h %p' user@server
 package main
 
 import (
@@ -44,9 +45,10 @@ var (
 	verbose   = flag.Bool("verbose", false, "Enable verbose logging")
 
 	// OIDC authentication flags
-	oidcIssuer   = flag.String("oidc-issuer", "", "OIDC issuer URL for automatic token acquisition")
-	oidcClientID = flag.String("oidc-client-id", "", "OIDC client ID (required if -oidc-issuer is set)")
-	oidcScopes   = flag.String("oidc-scopes", "openid", "OIDC scopes (comma-separated, default: openid)")
+	oidcIssuer       = flag.String("oidc-issuer", "", "OIDC issuer URL for automatic token acquisition")
+	oidcClientID     = flag.String("oidc-client-id", "", "OIDC client ID (required if -oidc-issuer is set)")
+	oidcClientSecret = flag.String("oidc-client-secret", "", "OIDC client secret (required if -oidc-issuer is set)")
+	oidcScopes       = flag.String("oidc-scopes", "openid", "OIDC scopes (comma-separated, default: openid)")
 )
 
 // proxyHandler implements http.Handler for the CONNECT proxy.
@@ -402,9 +404,10 @@ func createTokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 
 	// Configure OAuth2 client
 	oauth2Config := oauth2.Config{
-		ClientID: *oidcClientID,
-		Endpoint: p.Endpoint(),
-		Scopes:   scopes,
+		ClientID:     *oidcClientID,
+		ClientSecret: *oidcClientSecret,
+		Endpoint:     p.Endpoint(),
+		Scopes:       scopes,
 	}
 
 	// Create CLI token source with automatic browser flow

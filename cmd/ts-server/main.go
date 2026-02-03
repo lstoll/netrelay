@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -18,10 +19,12 @@ import (
 	"syscall"
 
 	"github.com/tink-crypto/tink-go/v2/jwt"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"lds.li/funnelproxy/connecttunnel"
 	"lds.li/oauth2ext/provider"
+	"tailscale.com/ipn"
 	"tailscale.com/tsnet"
 )
 
@@ -29,7 +32,8 @@ var (
 	hostname   = flag.String("hostname", "", "Tailscale hostname (default: generates one)")
 	port       = flag.String("port", "443", "Port to listen on (default: 443 for Funnel)")
 	authKey    = flag.String("authkey", "", "Tailscale auth key (optional, uses existing auth if not provided)")
-	stateDir   = flag.String("statedir", "", "Directory to store Tailscale state (default: .tsnet-state)")
+	kubeconfig = flag.String("kubeconfig", "", "Path to kubeconfig file (optional, uses in-cluster config if not provided)")
+	secretName = flag.String("secret-name", "", "Name of the secret to store the state in, namespace/name format")
 
 	// Authentication options
 	enableAuth = flag.Bool("auth", false, "Enable simple bearer token authentication")
@@ -58,6 +62,10 @@ func main() {
 		log.Fatal("Error: cannot use both -auth and -oidc-issuer (choose one authentication method)")
 	}
 
+	if *hostname == "" {
+		log.Fatal("Error: -hostname is required")
+	}
+
 	// Initialize OIDC provider if configured
 	var oidcProvider *provider.Provider
 	if *oidcIssuer != "" {
@@ -71,17 +79,19 @@ func main() {
 	}
 
 	// Create Tailscale server
+	ss, err := stateStore()
+	if err != nil {
+		log.Fatalf("Failed to create state store: %v", err)
+	}
+
 	srv := &tsnet.Server{
 		Hostname: *hostname,
 		Logf:     log.Printf,
+		Store:    ss,
 	}
 
 	if *authKey != "" {
 		srv.AuthKey = *authKey
-	}
-
-	if *stateDir != "" {
-		srv.Dir = *stateDir
 	}
 
 	// Start Tailscale
@@ -94,9 +104,12 @@ func main() {
 		log.Fatalf("Failed to get local client: %v", err)
 	}
 
+	// TODO: TLSConfig: &tls.Config{GetCertificate: lc.GetCertificate},
+	_ = lc
+
 	// Wait for Tailscale to be ready
 	ctx := context.Background()
-	status, err := lc.StatusWithoutPeers(ctx)
+	status, err := srv.Up(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get Tailscale status: %v", err)
 	}
@@ -177,19 +190,20 @@ func main() {
 		ErrorLog: log.Default(),
 	})
 
-	// Wrap with h2c handler for HTTP/2 cleartext support
-	// This is necessary because Tailscale Funnel terminates TLS
-	h2s := &http2.Server{}
-	handler := h2c.NewHandler(proxyHandler, h2s)
+	tlsConfig := &tls.Config{
+		GetCertificate: lc.GetCertificate,
+		NextProtos:     []string{"h2"},
+	}
 
 	// Create HTTP server
 	httpServer := &http.Server{
-		Handler: handler,
-		ErrorLog: log.Default(),
+		Handler:   proxyHandler,
+		ErrorLog:  log.Default(),
+		TLSConfig: tlsConfig,
 	}
 
 	// Listen on Tailscale with Funnel
-	listener, err := srv.ListenFunnel("tcp", ":"+*port)
+	listener, err := srv.ListenFunnel("tcp", ":"+*port, tsnet.FunnelTLSConfig(tlsConfig))
 	if err != nil {
 		log.Fatalf("Failed to listen with Funnel on port %s: %v", *port, err)
 	}
@@ -248,4 +262,39 @@ func extractBearerToken(req *http.Request) (string, error) {
 	}
 
 	return strings.TrimPrefix(auth, prefix), nil
+}
+
+func stateStore() (ipn.StateStore, error) {
+	var kubeConfig *rest.Config
+	if *kubeconfig != "" {
+		c, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+		if err != nil {
+			return nil, fmt.Errorf("building kubeconfig from %s: %w", *kubeconfig, err)
+		}
+		kubeConfig = c
+	} else {
+		c, err := rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("building in-cluster kubeconfig: %w", err)
+		}
+		kubeConfig = c
+	}
+	cs, err := kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		return nil, fmt.Errorf("building kubernetes clientset: %w", err)
+	}
+
+	sp := strings.Split(*secretName, "/")
+	if len(sp) != 2 {
+		return nil, fmt.Errorf("invalid secret name: %s", *secretName)
+	}
+	namespace := sp[0]
+	secret := sp[1]
+
+	return &k8sStateStore{
+		clientset: cs,
+		namespace: namespace,
+		secret:    secret,
+		name:      *hostname,
+	}, nil
 }
