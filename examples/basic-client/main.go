@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 
 	"lds.li/funnelproxy/connecttunnel"
 )

@@ -18,9 +18,9 @@ A comprehensive Go library for TCP tunneling over HTTP CONNECT protocol, support
 go get lds.li/funnelproxy
 ```
 
-### Ready-to-Run Server
+### Ready-to-Run Commands
 
-For a production-ready proxy server with Tailscale Funnel support:
+**Server** - Production-ready proxy server with Tailscale Funnel support:
 
 ```bash
 go install lds.li/funnelproxy/cmd/ts-server@latest
@@ -28,6 +28,19 @@ ts-server -hostname my-proxy
 ```
 
 This creates a publicly accessible CONNECT proxy at `https://my-proxy.ts.net:443` with automatic TLS via Tailscale Funnel. See [cmd/ts-server](cmd/ts-server/README.md) for full documentation.
+
+**Client** - Local HTTP CONNECT proxy that tunnels through a remote proxy:
+
+```bash
+go install lds.li/funnelproxy/cmd/local-proxy@latest
+local-proxy -proxy https://my-proxy.ts.net:443
+
+# Then use with any tool that supports HTTP proxies
+curl -x http://localhost:8080 https://example.com
+ssh -o ProxyCommand='nc -X connect -x localhost:8080 %h %p' user@server
+```
+
+See [cmd/local-proxy](cmd/local-proxy/README.md) for full documentation and examples.
 
 ## Quick Start
 
