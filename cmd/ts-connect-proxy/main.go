@@ -23,8 +23,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"lds.li/funnelproxy/connecttunnel"
 	"lds.li/oauth2ext/provider"
+	connecttunnel "lds.li/tunnel/connect"
 	"tailscale.com/ipn"
 	"tailscale.com/tsnet"
 )

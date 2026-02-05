@@ -1,4 +1,4 @@
-package connecttunnel
+package connect
 
 import (
 	"fmt"

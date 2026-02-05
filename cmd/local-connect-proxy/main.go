@@ -31,10 +31,10 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
-	"lds.li/funnelproxy/connecttunnel"
 	"lds.li/oauth2ext/clitoken"
 	"lds.li/oauth2ext/provider"
 	"lds.li/oauth2ext/tokencache"
+	connecttunnel "lds.li/tunnel/connect"
 )
 
 var (
