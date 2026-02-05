@@ -158,3 +158,17 @@ func (c *streamConnRW) SetReadDeadline(t time.Time) error {
 func (c *streamConnRW) SetWriteDeadline(t time.Time) error {
 	return nil
 }
+
+var _ net.Addr = (*remoteAddr)(nil)
+
+type remoteAddr struct {
+	addr string
+}
+
+func (a *remoteAddr) Network() string {
+	return "connecttunnel"
+}
+
+func (a *remoteAddr) String() string {
+	return a.addr
+}

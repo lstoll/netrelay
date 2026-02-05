@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,12 +14,12 @@ import (
 
 // h1Dialer implements Dialer for HTTP/1.1 CONNECT proxies.
 type h1Dialer struct {
-	proxyAddr string
-	proxyHost string
-	useTLS    bool
-	tlsConfig *tls.Config
-	header    http.Header
-	dial      DialFunc
+	proxyAddr  string
+	proxyHost  string
+	useTLS     bool
+	tlsConfig  *tls.Config
+	headerFunc func(req *http.Request) (http.Header, error)
+	dial       DialFunc
 }
 
 // NewH1Dialer creates a Dialer that connects through an HTTP/1.1 proxy.
@@ -50,12 +51,12 @@ func NewH1Dialer(cfg *ClientConfig) Dialer {
 	}
 
 	return &h1Dialer{
-		proxyAddr: proxyHost,
-		proxyHost: proxyURL.Hostname(),
-		useTLS:    useTLS,
-		tlsConfig: cfg.TLSConfig,
-		header:    cfg.Header,
-		dial:      dial,
+		proxyAddr:  proxyHost,
+		proxyHost:  proxyURL.Hostname(),
+		useTLS:     useTLS,
+		tlsConfig:  cfg.TLSConfig,
+		headerFunc: cfg.HeadersForRequest,
+		dial:       dial,
 	}
 }
 
@@ -86,18 +87,22 @@ func (d *h1Dialer) DialContext(ctx context.Context, network, address string) (ne
 
 	// Send CONNECT request
 	req := &http.Request{
-		Method: http.MethodConnect,
-		URL:    &url.URL{Opaque: address},
-		Host:   address,
-		Header: make(http.Header),
-		Proto:  "HTTP/1.1",
+		Method:     http.MethodConnect,
+		URL:        &url.URL{Opaque: address},
+		Host:       address,
+		Header:     make(http.Header),
+		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 	}
 
-	// Copy custom headers
-	for k, v := range d.header {
-		req.Header[k] = v
+	if d.headerFunc != nil {
+		addlHeaders, err := d.headerFunc(req)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("%w: failed to get additional headers: %v", ErrProxyConnect, err)
+		}
+		maps.Copy(req.Header, addlHeaders)
 	}
 
 	// Write request

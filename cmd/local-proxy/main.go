@@ -34,12 +34,12 @@ import (
 	"lds.li/funnelproxy/connecttunnel"
 	"lds.li/oauth2ext/clitoken"
 	"lds.li/oauth2ext/provider"
+	"lds.li/oauth2ext/tokencache"
 )
 
 var (
 	listen    = flag.String("listen", "localhost:8080", "Local proxy listen address")
 	proxyURL  = flag.String("proxy", "", "CONNECT proxy URL (required, e.g., https://proxy.example.com:443)")
-	proxyType = flag.String("type", "", "Proxy type: h1, h2, or h2c (default: auto-detect from URL)")
 	proxyAuth = flag.String("auth", "", "Proxy authentication header value (e.g., 'Bearer token')")
 	insecure  = flag.Bool("insecure", false, "Skip TLS verification")
 	verbose   = flag.Bool("verbose", false, "Enable verbose logging")
@@ -55,8 +55,6 @@ var (
 type proxyHandler struct {
 	dialer      connecttunnel.Dialer
 	tokenSource oauth2.TokenSource
-	authMu      sync.RWMutex
-	currentAuth string
 	verbose     bool
 	dialerMu    sync.RWMutex
 }
@@ -108,14 +106,14 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to create token source: %v", err)
 		}
-		tokenSource = ts
 		if *verbose {
 			log.Println("✓ OIDC token source created")
 		}
+		tokenSource = ts
 	}
 
 	// Create dialer
-	dialer, err := createDialer()
+	dialer, err := createDialer(tokenSource)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating dialer: %v\n", err)
 		os.Exit(1)
@@ -125,18 +123,7 @@ func main() {
 	handler := &proxyHandler{
 		dialer:      dialer,
 		tokenSource: tokenSource,
-		currentAuth: *proxyAuth,
 		verbose:     *verbose,
-	}
-
-	// Refresh auth token initially if using OIDC
-	if tokenSource != nil {
-		if err := handler.refreshAuth(); err != nil {
-			log.Fatalf("Failed to acquire initial OIDC token: %v", err)
-		}
-		if *verbose {
-			log.Println("✓ OIDC token acquired")
-		}
 	}
 
 	// Create HTTP server
@@ -184,21 +171,6 @@ func (h *proxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) {
 
 	if h.verbose {
 		log.Printf("CONNECT request to %s from %s", target, req.RemoteAddr)
-	}
-
-	// Refresh auth token if needed and recreate dialer
-	if h.tokenSource != nil {
-		if err := h.refreshAuth(); err != nil {
-			log.Printf("Token refresh failed: %v", err)
-			http.Error(w, "Proxy Authentication Required", http.StatusProxyAuthRequired)
-			return
-		}
-		// Recreate dialer with new auth token
-		if err := h.recreateDialer(); err != nil {
-			log.Printf("Failed to recreate dialer: %v", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
 	}
 
 	// Get current dialer
@@ -251,81 +223,6 @@ func (h *proxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// refreshAuth refreshes the authentication token from the token source.
-func (h *proxyHandler) refreshAuth() error {
-	if h.tokenSource == nil {
-		return nil
-	}
-
-	token, err := h.tokenSource.Token()
-	if err != nil {
-		return fmt.Errorf("failed to get token: %w", err)
-	}
-
-	idToken, ok := token.Extra("id_token").(string)
-	if !ok {
-		return fmt.Errorf("no id_token in response")
-	}
-
-	h.authMu.Lock()
-	h.currentAuth = "Bearer " + idToken
-	h.authMu.Unlock()
-
-	return nil
-}
-
-// recreateDialer recreates the dialer with the current auth token.
-func (h *proxyHandler) recreateDialer() error {
-	h.authMu.RLock()
-	auth := h.currentAuth
-	h.authMu.RUnlock()
-
-	// Build client config with updated auth
-	clientCfg := &connecttunnel.ClientConfig{
-		ProxyURL: *proxyURL,
-	}
-
-	if auth != "" {
-		clientCfg.Header = http.Header{
-			"Proxy-Authorization": []string{auth},
-		}
-	}
-
-	if *insecure {
-		clientCfg.TLSConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-
-	// Determine dialer type
-	dialerType := *proxyType
-	if dialerType == "" {
-		if strings.HasPrefix(*proxyURL, "https") {
-			dialerType = "h2"
-		} else {
-			dialerType = "h1"
-		}
-	}
-
-	// Create new dialer
-	var newDialer connecttunnel.Dialer
-	switch dialerType {
-	case "h1":
-		newDialer = connecttunnel.NewH1Dialer(clientCfg)
-	case "h2":
-		newDialer = connecttunnel.NewH2Dialer(clientCfg)
-	case "h2c":
-		newDialer = connecttunnel.NewH2CDialer(clientCfg)
-	default:
-		return fmt.Errorf("invalid proxy type: %s", dialerType)
-	}
-
-	// Replace dialer
-	h.dialerMu.Lock()
-	h.dialer = newDialer
-	h.dialerMu.Unlock()
-
-	return nil
-}
-
 // copyBidirectional copies data bidirectionally between two connections.
 func copyBidirectional(client, server net.Conn) {
 	done := make(chan struct{}, 2)
@@ -345,17 +242,31 @@ func copyBidirectional(client, server net.Conn) {
 }
 
 // createDialer creates a CONNECT dialer from the flags.
-func createDialer() (connecttunnel.Dialer, error) {
+func createDialer(tsTokenSource oauth2.TokenSource) (connecttunnel.Dialer, error) {
 	// Build client config
 	clientCfg := &connecttunnel.ClientConfig{
 		ProxyURL: *proxyURL,
-	}
-
-	// Add authentication header if provided
-	if *proxyAuth != "" {
-		clientCfg.Header = http.Header{
-			"Proxy-Authorization": []string{*proxyAuth},
-		}
+		HeadersForRequest: func(req *http.Request) (http.Header, error) {
+			if tsTokenSource != nil {
+				token, err := tsTokenSource.Token()
+				if err != nil {
+					return nil, fmt.Errorf("failed to get token: %w", err)
+				}
+				idToken, ok := token.Extra("id_token").(string)
+				if !ok {
+					return nil, fmt.Errorf("no id_token in response")
+				}
+				return http.Header{
+					"Authorization": []string{"Bearer " + idToken},
+				}, nil
+			}
+			if *proxyAuth != "" {
+				return http.Header{
+					"Proxy-Authorization": []string{*proxyAuth},
+				}, nil
+			}
+			return nil, nil
+		},
 	}
 
 	// Configure TLS if needed
@@ -364,28 +275,7 @@ func createDialer() (connecttunnel.Dialer, error) {
 		clientCfg.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 
-	// Determine dialer type
-	dialerType := *proxyType
-	if dialerType == "" {
-		// Auto-detect from URL
-		if strings.HasPrefix(*proxyURL, "https") {
-			dialerType = "h2"
-		} else {
-			dialerType = "h1"
-		}
-	}
-
-	// Create appropriate dialer
-	switch dialerType {
-	case "h1":
-		return connecttunnel.NewH1Dialer(clientCfg), nil
-	case "h2":
-		return connecttunnel.NewH2Dialer(clientCfg), nil
-	case "h2c":
-		return connecttunnel.NewH2CDialer(clientCfg), nil
-	default:
-		return nil, fmt.Errorf("invalid proxy type: %s (must be h1, h2, or h2c)", dialerType)
-	}
+	return connecttunnel.NewH2Dialer(clientCfg), nil
 }
 
 // createTokenSource creates an OAuth2 token source for OIDC authentication.
@@ -415,7 +305,23 @@ func createTokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 		OAuth2Config: oauth2Config,
 	}
 
-	return cliConfig.TokenSource(ctx)
+	clitsrc, err := cliConfig.TokenSource(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create token source: %w", err)
+	}
+
+	ccfg := tokencache.Config{
+		Issuer: *oidcIssuer,
+		CacheKey: tokencache.IDTokenCacheKey{
+			ClientID: *oidcClientID,
+			Scopes:   strings.Split(*oidcScopes, ","),
+		}.Key(),
+		WrappedSource: clitsrc,
+		OAuth2Config:  &oauth2Config,
+		Cache:         clitoken.BestCredentialCache(),
+	}
+
+	return ccfg.TokenSource(ctx)
 }
 
 // handleShutdown handles graceful shutdown on SIGINT/SIGTERM.

@@ -59,9 +59,10 @@ type ClientConfig struct {
 	// Optional. Only used when ProxyURL scheme is "https".
 	TLSConfig *tls.Config
 
-	// Header specifies additional HTTP headers to send with CONNECT requests.
-	// Optional. Useful for proxy authentication (Proxy-Authorization header).
-	Header http.Header
+	// HeadersForRequest is called if present for a given request to get
+	// additional headers to send with the CONNECT request. If nil, no
+	// additional headers are sent. Used for authentication etc.
+	HeadersForRequest func(req *http.Request) (http.Header, error)
 
 	// DialContext specifies an optional dialer for establishing the proxy connection.
 	// If nil, net.Dialer{}.DialContext is used.

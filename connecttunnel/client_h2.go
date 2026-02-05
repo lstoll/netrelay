@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,9 +16,9 @@ import (
 
 // h2Dialer implements Dialer for HTTP/2 CONNECT proxies.
 type h2Dialer struct {
-	proxyURL  *url.URL
-	transport *http2.Transport
-	header    http.Header
+	proxyURL   *url.URL
+	transport  *http2.Transport
+	headerFunc func(req *http.Request) (http.Header, error)
 }
 
 // NewH2Dialer creates a Dialer that connects through an HTTP/2 proxy.
@@ -52,9 +53,9 @@ func NewH2Dialer(cfg *ClientConfig) Dialer {
 	}
 
 	return &h2Dialer{
-		proxyURL:  proxyURL,
-		transport: transport,
-		header:    cfg.Header,
+		proxyURL:   proxyURL,
+		transport:  transport,
+		headerFunc: cfg.HeadersForRequest,
 	}
 }
 
@@ -89,9 +90,9 @@ func NewH2CDialer(cfg *ClientConfig) Dialer {
 	}
 
 	return &h2Dialer{
-		proxyURL:  proxyURL,
-		transport: transport,
-		header:    cfg.Header,
+		proxyURL:   proxyURL,
+		transport:  transport,
+		headerFunc: cfg.HeadersForRequest,
 	}
 }
 
@@ -118,8 +119,14 @@ func (d *h2Dialer) DialContext(ctx context.Context, network, address string) (ne
 	}
 
 	// Copy custom headers
-	for k, v := range d.header {
-		req.Header[k] = v
+	if d.headerFunc != nil {
+		addlHeaders, err := d.headerFunc(req)
+		if err != nil {
+			pr.Close()
+			pw.Close()
+			return nil, fmt.Errorf("%w: failed to get additional headers: %v", ErrProxyConnect, err)
+		}
+		maps.Copy(req.Header, addlHeaders)
 	}
 
 	// Set context
@@ -145,13 +152,13 @@ func (d *h2Dialer) DialContext(ctx context.Context, network, address string) (ne
 	}
 
 	// Parse remote address
-	remoteAddr, err := net.ResolveTCPAddr("tcp", address)
-	if err != nil {
-		resp.Body.Close()
-		pr.Close()
-		pw.Close()
-		return nil, fmt.Errorf("connecttunnel: invalid address: %v", err)
-	}
+	// remoteAddr, err := net.ResolveTCPAddr("tcp", address)
+	// if err != nil {
+	// 	resp.Body.Close()
+	// 	pr.Close()
+	// 	pw.Close()
+	// 	return nil, fmt.Errorf("connecttunnel: invalid address: %v", err)
+	// }
 
 	// Create a bidirectional stream:
 	// - Write to pw (goes to server via request body)
@@ -164,7 +171,7 @@ func (d *h2Dialer) DialContext(ctx context.Context, network, address string) (ne
 	}
 
 	// Wrap as net.Conn
-	return newStreamConnRW(conn, remoteAddr), nil
+	return newStreamConnRW(conn, &remoteAddr{addr: address}), nil
 }
 
 // h2Conn provides bidirectional I/O for HTTP/2 CONNECT.

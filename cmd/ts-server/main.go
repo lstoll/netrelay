@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -119,6 +120,10 @@ func main() {
 
 	// Create the CONNECT proxy handler
 	proxyHandler := connecttunnel.NewHandler(&connecttunnel.ServerConfig{
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			log.Printf("++ tailscale Dialing %s %s", network, address)
+			return srv.Dial(ctx, network, address)
+		},
 		OnTunnel: func(ctx context.Context, req *http.Request) error {
 			// Extract target for logging
 			target := req.Host
