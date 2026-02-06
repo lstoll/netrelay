@@ -99,7 +99,7 @@ func (d *h1Dialer) DialContext(ctx context.Context, network, address string) (ne
 	if d.headerFunc != nil {
 		addlHeaders, err := d.headerFunc(req)
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return nil, fmt.Errorf("%w: failed to get additional headers: %v", ErrProxyConnect, err)
 		}
 		maps.Copy(req.Header, addlHeaders)
@@ -107,7 +107,7 @@ func (d *h1Dialer) DialContext(ctx context.Context, network, address string) (ne
 
 	// Write request
 	if err := req.Write(conn); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("%w: failed to write request: %v", ErrProxyConnect, err)
 	}
 
@@ -115,14 +115,14 @@ func (d *h1Dialer) DialContext(ctx context.Context, network, address string) (ne
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("%w: failed to read response: %v", ErrProxyConnect, err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		conn.Close()
+		_ = conn.Close()
 		return nil, &ProxyError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,

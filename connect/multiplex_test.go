@@ -23,7 +23,7 @@ func TestH2Multiplexing(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create echo server %d: %v", i, err)
 		}
-		defer listener.Close()
+		defer func() { _ = listener.Close() }()
 		echoAddrs[i] = listener.Addr().String()
 
 		// Echo server
@@ -34,8 +34,8 @@ func TestH2Multiplexing(t *testing.T) {
 					return
 				}
 				go func(c net.Conn) {
-					defer c.Close()
-					io.Copy(c, c)
+					defer func() { _ = c.Close() }()
+					_, _ = io.Copy(c, c)
 				}(conn)
 			}
 		}(listener, i)
@@ -77,7 +77,7 @@ func TestH2Multiplexing(t *testing.T) {
 				errors <- err
 				return
 			}
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 
 			// Send unique message
 			message := []byte("test-" + string(rune('0'+idx)))
@@ -87,7 +87,7 @@ func TestH2Multiplexing(t *testing.T) {
 			}
 
 			// Read echo
-			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 			buf := make([]byte, len(message))
 			if _, err := io.ReadFull(conn, buf); err != nil {
 				errors <- err

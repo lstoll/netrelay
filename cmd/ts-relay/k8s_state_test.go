@@ -10,7 +10,7 @@ import (
 
 func TestCK8sState(t *testing.T) {
 	store := &k8sStateStore{
-		clientset: fake.NewSimpleClientset(),
+		clientset: fake.NewClientset(),
 		namespace: "test",
 		secret:    "map",
 		name:      "hostname",

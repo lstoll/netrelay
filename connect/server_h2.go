@@ -61,7 +61,7 @@ func (h *h2Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Enable full duplex mode for HTTP/2 streams
 	rc := http.NewResponseController(w)
 	if err := rc.EnableFullDuplex(); err != nil {
-		upstream.Close()
+		_ = upstream.Close()
 		h.cfg.getLogger().Printf("failed to enable full duplex: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
@@ -72,7 +72,7 @@ func (h *h2Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	// Flush headers to establish the tunnel
 	if err := rc.Flush(); err != nil {
-		upstream.Close()
+		_ = upstream.Close()
 		h.cfg.getLogger().Printf("failed to flush response: %v", err)
 		return
 	}
@@ -84,8 +84,8 @@ func (h *h2Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // tunnel performs bidirectional copying between the HTTP/2 stream and upstream connection.
 func (h *h2Handler) tunnel(ctx context.Context, reqBody io.ReadCloser, w http.ResponseWriter, upstream net.Conn) {
-	defer reqBody.Close()
-	defer upstream.Close()
+	defer func() { _ = reqBody.Close() }()
+	defer func() { _ = upstream.Close() }()
 
 	// Get flusher for immediate data transmission
 	// HTTP/2 requires explicit flushing to send data frames immediately
@@ -98,7 +98,7 @@ func (h *h2Handler) tunnel(ctx context.Context, reqBody io.ReadCloser, w http.Re
 		_, err := io.Copy(upstream, reqBody)
 		// Close write side of upstream when client sends EOF
 		if conn, ok := upstream.(*net.TCPConn); ok {
-			conn.CloseWrite()
+			_ = conn.CloseWrite()
 		}
 		errCh <- err
 	}()

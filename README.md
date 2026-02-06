@@ -1,4 +1,4 @@
-# tunnel
+# netrelay
 
 A grab bag of things to tunnel traffic over http/X
 

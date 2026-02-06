@@ -1,4 +1,4 @@
-module lds.li/tunnel
+module lds.li/netrelay
 
 go 1.25.6
 

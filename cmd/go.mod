@@ -1,6 +1,6 @@
-module lds.li/tunnel/cmd
+module lds.li/netrelay/cmd
 
-replace lds.li/tunnel => ../
+replace lds.li/netrelay => ../
 
 go 1.25.7
 
@@ -10,8 +10,8 @@ require (
 	k8s.io/api v0.35.0
 	k8s.io/apimachinery v0.35.0
 	k8s.io/client-go v0.35.0
+	lds.li/netrelay v0.0.0-00010101000000-000000000000
 	lds.li/oauth2ext v0.2.0
-	lds.li/tunnel v0.0.0-00010101000000-000000000000
 	tailscale.com v1.94.1
 )
 

@@ -31,10 +31,10 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+	connecttunnel "lds.li/netrelay/connect"
 	"lds.li/oauth2ext/clitoken"
 	"lds.li/oauth2ext/provider"
 	"lds.li/oauth2ext/tokencache"
-	connecttunnel "lds.li/tunnel/connect"
 )
 
 var (
@@ -188,7 +188,7 @@ func (h *proxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
-	defer proxyConn.Close()
+	defer func() { _ = proxyConn.Close() }()
 
 	// Hijack client connection
 	hijacker, ok := w.(http.Hijacker)
@@ -202,7 +202,7 @@ func (h *proxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) {
 		log.Printf("Hijack failed: %v", err)
 		return
 	}
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 
 	// Send success response
 	_, err = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
@@ -228,12 +228,12 @@ func copyBidirectional(client, server net.Conn) {
 	done := make(chan struct{}, 2)
 
 	go func() {
-		io.Copy(server, client)
+		_, _ = io.Copy(server, client)
 		done <- struct{}{}
 	}()
 
 	go func() {
-		io.Copy(client, server)
+		_, _ = io.Copy(client, server)
 		done <- struct{}{}
 	}()
 

@@ -20,7 +20,7 @@ import (
 func TestH1ServerClient(t *testing.T) {
 	// Create echo server
 	echoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(w, r.Body)
+		_, _ = io.Copy(w, r.Body)
 	}))
 	defer echoServer.Close()
 
@@ -48,7 +48,7 @@ func TestH1ServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to dial through proxy: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Send HTTP request through tunnel
 	message := "Hello, World!"
@@ -60,7 +60,7 @@ func TestH1ServerClient(t *testing.T) {
 	}
 
 	// Set read timeout
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
 	// Read response
 	buf := make([]byte, 4096)
@@ -81,7 +81,7 @@ func TestH1ServerClient(t *testing.T) {
 func TestH2ServerClient(t *testing.T) {
 	// Create echo server
 	echoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(w, r.Body)
+		_, _ = io.Copy(w, r.Body)
 	}))
 	defer echoServer.Close()
 
@@ -114,7 +114,7 @@ func TestH2ServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to dial through proxy: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Send HTTP request through tunnel
 	message := "Hello, HTTP/2!"
@@ -144,7 +144,7 @@ func TestH2ServerClient(t *testing.T) {
 func TestH2CServerClient(t *testing.T) {
 	// Create echo server
 	echoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(w, r.Body)
+		_, _ = io.Copy(w, r.Body)
 	}))
 	defer echoServer.Close()
 
@@ -164,11 +164,11 @@ func TestH2CServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create listener: %v", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	proxyAddr := listener.Addr().String()
-	go h1s.Serve(listener)
-	defer h1s.Close()
+	go func() { _ = h1s.Serve(listener) }()
+	defer func() { _ = h1s.Close() }()
 
 	// Give server time to start
 	time.Sleep(100 * time.Millisecond)
@@ -187,7 +187,7 @@ func TestH2CServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to dial through proxy: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Send HTTP request through tunnel
 	message := "Hello, h2c!"
@@ -217,7 +217,7 @@ func TestH2CServerClient(t *testing.T) {
 func TestUnifiedHandler(t *testing.T) {
 	// Create echo server
 	echoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(w, r.Body)
+		_, _ = io.Copy(w, r.Body)
 	}))
 	defer echoServer.Close()
 
@@ -243,12 +243,12 @@ func TestUnifiedHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to dial: %v", err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		message := "Test HTTP/1.1"
 		req := fmt.Sprintf("POST / HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n\r\n%s",
 			echoAddr, len(message), message)
-		conn.Write([]byte(req))
+		_, _ = conn.Write([]byte(req))
 
 		buf := make([]byte, 4096)
 		n, _ := conn.Read(buf)
@@ -276,12 +276,12 @@ func TestUnifiedHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to dial: %v", err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		message := "Test HTTP/2"
 		req := fmt.Sprintf("POST / HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n\r\n%s",
 			echoAddr, len(message), message)
-		conn.Write([]byte(req))
+		_, _ = conn.Write([]byte(req))
 
 		buf := make([]byte, 4096)
 		n, _ := conn.Read(buf)

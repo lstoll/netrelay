@@ -23,8 +23,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	connecttunnel "lds.li/netrelay/connect"
 	"lds.li/oauth2ext/provider"
-	connecttunnel "lds.li/tunnel/connect"
 	"tailscale.com/ipn"
 	"tailscale.com/tsnet"
 )
@@ -97,7 +97,7 @@ func main() {
 
 	// Start Tailscale
 	log.Println("Starting Tailscale...")
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	// Get local client for Funnel configuration
 	lc, err := srv.LocalClient()
@@ -212,7 +212,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to listen with Funnel on port %s: %v", *port, err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	// Get the Funnel URL
 	funnelURL := "https://" + status.Self.DNSName + ":" + *port
@@ -236,7 +236,7 @@ func main() {
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
 		log.Println("\nShutting down gracefully...")
-		httpServer.Close()
+		_ = httpServer.Close()
 	}()
 
 	// Start serving

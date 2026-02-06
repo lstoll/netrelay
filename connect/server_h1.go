@@ -54,14 +54,14 @@ func (h *h1Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Hijack the client connection
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		upstream.Close()
+		_ = upstream.Close()
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	client, bufrw, err := hijacker.Hijack()
 	if err != nil {
-		upstream.Close()
+		_ = upstream.Close()
 		h.cfg.getLogger().Printf("hijack failed: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
@@ -70,14 +70,14 @@ func (h *h1Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Send success response
 	_, err = bufrw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
 	if err != nil {
-		client.Close()
-		upstream.Close()
+		_ = client.Close()
+		_ = upstream.Close()
 		h.cfg.getLogger().Printf("failed to write response: %v", err)
 		return
 	}
 	if err = bufrw.Flush(); err != nil {
-		client.Close()
-		upstream.Close()
+		_ = client.Close()
+		_ = upstream.Close()
 		h.cfg.getLogger().Printf("failed to flush response: %v", err)
 		return
 	}
@@ -90,8 +90,8 @@ func (h *h1Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // tunnel performs bidirectional copying between client and upstream connections.
 func (h *h1Handler) tunnel(ctx context.Context, client, upstream net.Conn) {
-	defer client.Close()
-	defer upstream.Close()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = upstream.Close() }()
 
 	errCh := make(chan error, 2)
 
@@ -100,7 +100,7 @@ func (h *h1Handler) tunnel(ctx context.Context, client, upstream net.Conn) {
 		_, err := io.Copy(upstream, client)
 		// Close write side of upstream when client sends EOF
 		if conn, ok := upstream.(*net.TCPConn); ok {
-			conn.CloseWrite()
+			_ = conn.CloseWrite()
 		}
 		errCh <- err
 	}()
@@ -110,7 +110,7 @@ func (h *h1Handler) tunnel(ctx context.Context, client, upstream net.Conn) {
 		_, err := io.Copy(client, upstream)
 		// Close write side of client when upstream sends EOF
 		if conn, ok := client.(*net.TCPConn); ok {
-			conn.CloseWrite()
+			_ = conn.CloseWrite()
 		}
 		errCh <- err
 	}()

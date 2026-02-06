@@ -13,7 +13,7 @@ A Tailscale Funnel-enabled CONNECT proxy server that uses Tailscale as a library
 ## Installation
 
 ```bash
-go install lds.li/tunnel/cmd/ts-server@latest
+go install lds.li/netrelay/cmd/ts-server@latest
 ```
 
 Or build from source:
@@ -133,7 +133,7 @@ curl -x https://my-proxy.ts.net:443 \
 ### Using with the connecttunnel library
 
 ```go
-import "lds.li/tunnel/connect"
+import "lds.li/netrelay/connect"
 
 // Without authentication
 dialer := connecttunnel.NewH2Dialer(&connecttunnel.ClientConfig{

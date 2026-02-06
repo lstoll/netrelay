@@ -122,8 +122,8 @@ func (d *h2Dialer) DialContext(ctx context.Context, network, address string) (ne
 	if d.headerFunc != nil {
 		addlHeaders, err := d.headerFunc(req)
 		if err != nil {
-			pr.Close()
-			pw.Close()
+			_ = pr.Close()
+			_ = pw.Close()
 			return nil, fmt.Errorf("%w: failed to get additional headers: %v", ErrProxyConnect, err)
 		}
 		maps.Copy(req.Header, addlHeaders)
@@ -135,16 +135,16 @@ func (d *h2Dialer) DialContext(ctx context.Context, network, address string) (ne
 	// Send request - this returns after response headers are received
 	resp, err := d.transport.RoundTrip(req)
 	if err != nil {
-		pr.Close()
-		pw.Close()
+		_ = pr.Close()
+		_ = pw.Close()
 		return nil, fmt.Errorf("%w: %v", ErrProxyConnect, err)
 	}
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		pr.Close()
-		pw.Close()
+		_ = resp.Body.Close()
+		_ = pr.Close()
+		_ = pw.Close()
 		return nil, &ProxyError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
@@ -159,6 +159,8 @@ func (d *h2Dialer) DialContext(ctx context.Context, network, address string) (ne
 	// 	pw.Close()
 	// 	return nil, fmt.Errorf("connecttunnel: invalid address: %v", err)
 	// }
+
+	// TODO - what did we get from the above?
 
 	// Create a bidirectional stream:
 	// - Write to pw (goes to server via request body)
