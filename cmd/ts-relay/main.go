@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -25,7 +26,9 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	connecttunnel "lds.li/netrelay/connect"
 	"lds.li/oauth2ext/provider"
+	"tailscale.com/client/local"
 	"tailscale.com/ipn"
+	"tailscale.com/net/tsaddr"
 	"tailscale.com/tsnet"
 )
 
@@ -46,6 +49,73 @@ var (
 
 	verbose = flag.Bool("verbose", false, "Enable verbose logging")
 )
+
+// useTailscaleDial reports whether the given host is on the tailnet and should
+// be dialed via Tailscale (srv.Dial). Otherwise the connection should go out
+// over the normal network.
+func useTailscaleDial(ctx context.Context, lc *local.Client, host string) bool {
+	// If host is an IP, use Tailscale only for Tailscale-assigned IPs.
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return tsaddr.IsTailscaleIP(ip)
+	}
+	// Host is a hostname: check if it's a tailnet peer (by name or by resolved IP).
+	status, err := lc.Status(ctx)
+	if err != nil {
+		return false
+	}
+	// Build set of tailnet peer short names and IPs.
+	var peerNames []string
+	var peerIPs []netip.Addr
+	if status.Self != nil {
+		peerIPs = append(peerIPs, status.Self.TailscaleIPs...)
+		peerNames = append(peerNames, status.Self.HostName)
+		if status.Self.DNSName != "" {
+			peerNames = append(peerNames, dnsShortName(status.Self.DNSName))
+		}
+	}
+	for _, ps := range status.Peer {
+		peerIPs = append(peerIPs, ps.TailscaleIPs...)
+		peerNames = append(peerNames, ps.HostName)
+		if ps.DNSName != "" {
+			peerNames = append(peerNames, dnsShortName(ps.DNSName))
+		}
+	}
+	hostLower := strings.ToLower(strings.TrimSuffix(host, "."))
+	for _, name := range peerNames {
+		if name == "" {
+			continue
+		}
+		if strings.ToLower(name) == hostLower {
+			return true
+		}
+	}
+	// Resolve host; if any resolved IP is a Tailscale IP or matches a peer, use Tailscale.
+	resolver := net.DefaultResolver
+	addrs, err := resolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return false
+	}
+	for _, ip := range addrs {
+		if tsaddr.IsTailscaleIP(ip) {
+			return true
+		}
+		for _, peerIP := range peerIPs {
+			if ip == peerIP {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// dnsShortName returns the first label of a DNS name (e.g. "myserver" from "myserver.tail-net.").
+func dnsShortName(dnsName string) string {
+	s := strings.TrimSuffix(dnsName, ".")
+	if idx := strings.Index(s, "."); idx >= 0 {
+		return s[:idx]
+	}
+	return s
+}
 
 func main() {
 	flag.Parse()
@@ -105,9 +175,6 @@ func main() {
 		log.Fatalf("Failed to get local client: %v", err)
 	}
 
-	// TODO: TLSConfig: &tls.Config{GetCertificate: lc.GetCertificate},
-	_ = lc
-
 	// Wait for Tailscale to be ready
 	ctx := context.Background()
 	status, err := srv.Up(ctx)
@@ -118,11 +185,25 @@ func main() {
 	log.Printf("Tailscale node: %s", status.Self.DNSName)
 	log.Printf("Tailscale addresses: %v", status.Self.TailscaleIPs)
 
-	// Create the CONNECT proxy handler
+	// Create the CONNECT proxy handler with tailnet-aware dialing:
+	// use Tailscale for hosts on the tailnet, normal network for internet hosts.
+	netDialer := &net.Dialer{}
 	proxyHandler := connecttunnel.NewHandler(&connecttunnel.ServerConfig{
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			log.Printf("++ tailscale Dialing %s %s", network, address)
-			return srv.Dial(ctx, network, address)
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				host = address
+			}
+			if useTailscaleDial(ctx, lc, host) {
+				if *verbose {
+					log.Printf("Dialing via Tailscale: %s %s", network, address)
+				}
+				return srv.Dial(ctx, network, address)
+			}
+			if *verbose {
+				log.Printf("Dialing via network: %s %s", network, address)
+			}
+			return netDialer.DialContext(ctx, network, address)
 		},
 		OnTunnel: func(ctx context.Context, req *http.Request) error {
 			// Extract target for logging
