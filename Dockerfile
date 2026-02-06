@@ -15,5 +15,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build cd cmd && CGO_ENABLED=0 go i
 
 FROM debian:trixie
 
+RUN apt update && apt install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /go/bin/local-relay /usr/bin/local-relay
 COPY --from=build /go/bin/ts-relay /usr/bin/ts-relay
